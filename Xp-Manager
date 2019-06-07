@@ -1,0 +1,139 @@
+var XpManager = XpManager || (function(){
+    let characters = [],
+    tokens = [],
+    xpAttributes = [],
+    nextXpAttributes = [],
+    levelFlags = [],
+    pageID,
+    xp = function(amount){
+        xpAttributes.forEach(function(x, i){
+            x.set({
+                current: parseInt(x.get('current')) + Math.round(amount/xpAttributes.length)
+            });
+            checkLevelUp(characters[i]);
+        });
+    },
+    checkLevelUp = function(char, isDrop = false){
+        let charIndex = characters.findIndex((c) => c.get('_id') == char.get('_id')),
+        dropReady = (levelFlags[charIndex].get('current') == 0 || (levelFlags[charIndex].get('current') == 1 && isDrop)),
+        levelReady = parseInt(xpAttributes[charIndex].get('current')) > parseInt(nextXpAttributes[charIndex].get('current'));
+        if(dropReady && levelReady){
+            tokens[charIndex].set({
+                aura2_radius: 1,
+                aura2_color: '#6ced6a'
+            });
+            levelFlags[charIndex].set({
+                current: 1
+            });
+            sendChat('Xp Manager', characters[charIndex].get('name') + ' is ready to level!');
+        }
+        else{
+            if(!levelReady){
+                tokens[charIndex].set({
+                    aura2_radius: 0,
+                });
+                levelFlags[charIndex].set({
+                    current: 0
+                });
+            }
+        }
+    },
+    handleCall = function(msg){
+        if(msg.type == "api" && /^!xp/i.test(msg.content) && playerIsGM(msg.playerid)){
+            let xpAdd = parseInt(msg.content.split(' ')[1]);
+            if(xpAdd != "NaN"){
+                xp(xpAdd);
+            }
+        }
+    },
+    handleCharacterAdd = function(obj){
+        if(obj.get('represents') !== ''){ 
+            let represents = obj.get('represents'),
+            char = getObj('character', represents),
+            token = findObjs({
+                    _pageid: pageID,
+                    _type: 'graphic',
+                    _subtype: 'token',
+                    represents: represents
+            })[0];
+            //log(represents);
+            //log(JSON.stringify(token));
+            if(getAttrByName(char.get('_id'), 'is_npc', 'current') == 0){
+                    let xp = findObjs({
+                        _type: 'attribute',
+                        _characterid: represents,
+                        name: 'xp'
+                    })[0],
+                    nextXp = findObjs({
+                        _type: 'attribute',
+                        _characterid: represents,
+                        name: 'xp_next_level'
+                    })[0],
+                    levelFlag = findObjs({
+                        _type: 'attribute', 
+                        _characterid: represents, 
+                        name: 'levelup_flag'
+                    })[0];
+                    
+                    if(!levelFlag){
+                        levelFlag = createObj("attribute",{
+                            name:"levelup_flag",
+                            current: 0,
+                            characterid: represents
+                        });
+                    }
+                    characters.push(char);
+                    tokens.push(token);
+                    xpAttributes.push(xp);
+                    nextXpAttributes.push(nextXp);
+                    levelFlags.push(levelFlag);
+                    
+                    checkLevelUp(char, true);
+            }  
+        }
+    },
+    handleDeprecator = function(obj){
+        let removedChar = characters.findIndex((c) => c.get('id') == obj.get('represents'));
+        if (removedChar != -1){
+            characters.splice(removedChar, 1);
+            tokens.splice(removedChar, 1);
+            xpAttributes.splice(removedChar, 1);
+            nextXpAttributes.splice(removedChar, 1);  
+            levelFlags.splice(removedChar, 1);
+        }
+    },
+    handleLoad = function(){
+        pageID = Campaign().get('playerpageid');
+        let graphics = findObjs({
+            _pageid: pageID,
+            _type: 'graphic',
+            _subtype: 'token'
+        });
+        characters = [];
+        tokens = [];
+        xpAttributes = [];
+        nextXpAttributes = [];
+        levelFlags = [];
+        
+        graphics.forEach(g => {
+            handleCharacterAdd(g);
+        });
+    },
+    registerEventHandlers = function(){
+        on('change:campaign:playerpageid', handleLoad);
+        on('add:graphic', handleCharacterAdd);
+        on('destroy:graphic', handleDeprecator);
+        on('chat:message', handleCall);
+    }
+    return {
+        RegisterEventHandlers: registerEventHandlers,
+        HandleLoad: handleLoad
+    };
+}());
+
+on('ready', function(){
+    'use strict';
+    
+    XpManager.HandleLoad();
+    XpManager.RegisterEventHandlers();
+});
